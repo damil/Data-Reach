@@ -363,7 +363,7 @@ modern Perl, except that it does not handle overloads, which
 were not available at that time. The API is a bit too rich to my
 taste (many different ways to get or set data).
 
-=item L<Data::DPath> or L<Data::Path>
+=item L<Data::DPath>
 
 Two competing modules for accessing nested data through expressions
 similar to XPath. Very interesting, but a bit overkill for the needs
