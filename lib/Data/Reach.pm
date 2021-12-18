@@ -113,68 +113,62 @@ sub each_path (+;$) {
   my ($tree, $level) = @_;
   $level //= -1;
 
-
   my $hint_hash = (caller(1))[10];
 
-
   my $is_consumed;
+  my $leaf = sub {return $is_consumed++ ? () : ([], $tree)};
+
+  my $next_subpath;
+  my $path_item;
 
   my $reftype = reftype $tree;
-
   if (!$reftype || !$level || $reftype eq 'REF' || $reftype eq 'SCALAR' || $reftype eq 'REGEXP') {
-    return sub { return $is_consumed++ ? () : ([], $tree) };
+    return $leaf;
   }
   elsif ($reftype eq 'HASH') {
-    return sub {$is_consumed++ ? () : ([], {})}
-      if !(keys %$tree) && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
-
-    my $each_subtree;
-    my $k;
+    return $leaf if !(keys %$tree) && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
     return sub {
       while (1) {
-        if (!$each_subtree) {
-          if (!$is_consumed && (($k, my $v) = each %$tree)) {
-            $each_subtree = each_path($v, $level-1);
+        if (!$next_subpath) {
+          if (!$is_consumed && (($path_item, my $v) = each %$tree)) {
+            $next_subpath = each_path($v, $level-1);
           }
           else {
             $is_consumed++;
             return;
           }
         }
-        if (my ($path, $subval) = $each_subtree->()) {
-          return ([$k, @$path], $subval);
+        if (my ($subpath, $subval) = $next_subpath->()) {
+          return ([$path_item, @$subpath], $subval);
         }
         else {
-          $each_subtree = undef;
-          $k = undef;
+          $next_subpath = undef;
+          $path_item    = undef;
         }
       }
     }
   }
 
   elsif ($reftype eq 'ARRAY') {
-    return sub {$is_consumed++ ? () : ([], [])}
-      if !@$tree && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
-
-    my $i = 0;
-    my $each_subtree;
+    return $leaf if !@$tree && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+    $path_item = 0;
     return sub {
       while (1) {
-        if (!$each_subtree) {
-          if (!$is_consumed && $i < @$tree) {
-            $each_subtree = each_path($tree->[$i], $level-1);
+        if (!$next_subpath) {
+          if (!$is_consumed && $path_item < @$tree) {
+            $next_subpath = each_path($tree->[$path_item], $level-1);
           }
           else {
             $is_consumed++;
             return;
           }
         }
-        if (my ($path, $subval) = $each_subtree->()) {
-          return ([$i, @$path], $subval);
+        if (my ($subpath, $subval) = $next_subpath->()) {
+          return ([$path_item, @$subpath], $subval);
         }
         else {
-          $each_subtree = undef;
-          $i++;
+          $next_subpath = undef;
+          $path_item++;
         }
       }
     }
