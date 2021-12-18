@@ -1,7 +1,7 @@
 #!perl
 use strict;
 use warnings;
-use Test::More;
+use Test::More tests => 3;
 use Test::NoWarnings;
 use Data::Reach 'each_path';
 
@@ -19,7 +19,7 @@ my $data = {
   stringref   => \"ref",
   refref      => \\"ref",
 };
-$data->{sparse_array}[3000] = "i'm alone";
+
 
 
 {
@@ -28,7 +28,18 @@ $data->{sparse_array}[3000] = "i'm alone";
   while (my ($path, $val) = $next_path->()) {
     $got_path{join ",", @$path} = $val;
   }
-  note explain \%got_path;
+  is_deeply(\%got_path, 
+            {   'empty_slot'    => undef,
+                'foo,0'         => undef,
+                'foo,1'         => 'abc',
+                'foo,2,bar,buz' => 987,
+                'foo,3'         => 1234,
+                'qux'           => 'qux',
+                'refref'        => \\'ref',
+                'stringref'     => \'ref', },
+             'without empty subtrees' );
+
+
 }
 
 
@@ -39,10 +50,20 @@ $data->{sparse_array}[3000] = "i'm alone";
   while (my ($path, $val) = $next_path->()) {
     $got_path{join ",", @$path} = $val;
   }
-  note explain \%got_path;
+  is_deeply(\%got_path,
+            { 'empty_array'   => [],
+              'empty_hash'    => {},
+              'empty_slot'    => undef,
+              'foo,0'         => undef,
+              'foo,1'         => 'abc',
+              'foo,2,bar,buz' => 987,
+              'foo,3'         => 1234,
+              'qux'           => 'qux',
+              'refref'        => \\'ref',
+              'stringref'     => \'ref',    },
+             'with empty subtrees' );
 }
 
 
 
 
-done_testing();

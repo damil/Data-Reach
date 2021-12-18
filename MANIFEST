@@ -9,6 +9,8 @@ t/02-import_as.t
 t/03-no_import.t
 t/04-import_empty.t
 t/05-regular_import.t
+t/06-each-path.t
+t/07_map_paths.t
 t/99-pod.t
 META.yml
 META.json

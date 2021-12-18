@@ -11,6 +11,7 @@ our $VERSION    = '1.00';
 =begin TODO
 
   - API for import() : include each_path() and map_paths()
+  - each_path() should respect :peek_blessed
   - implement map_paths()
   - change API for hint hash : which syntax ? ex use .. qw/:use_overloads/;
                                                 ? or qw/!use_overloads/ ... confusing with no ...
@@ -184,15 +185,39 @@ sub each_path (+;$) {
 }
 
 
-sub map_paths (&+;$) {
-  my ($coderef, $tree, $level)= @_;
 
-  
+#======================================================================
+# implementation for map_paths()
+#======================================================================
 
+# front API
+sub map_paths (&+;$$); # must declare before sub definition because of recursive call
+sub map_paths (&+;$$) {
+  my ($coderef, $tree, $level, $path)= @_;
+
+  $level //= -1;
+  $path  //= [];
+
+  my $hint_hash = (caller(1))[10];
+  my $reftype = reftype $tree;
+
+
+  if (!$reftype || !$level || $reftype eq 'REF' || $reftype eq 'SCALAR' || $reftype eq 'REGEXP') {
+    return $coderef->(@$path, $tree);
+  }
+  elsif ($reftype eq 'HASH') {
+    my @k = keys %$tree;
+    return $coderef->(@$path, {}) if !@k  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+    return map {map_paths(\&$coderef, $tree->{$_}, $level-1, [@$path, $_])} @k;
+  }
+  elsif ($reftype eq 'ARRAY') {
+    return $coderef->(@$path, []) if !@$tree  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+    return map {map_paths(\&$coderef, $tree->[$_], $level-1, [@$path, $_])} 0 .. $#$tree;
+  }
+  else {
+    die "cannot walk into $reftype at position " . join(",", @$path);
+  }
 }
-
-
-
 
 
 
