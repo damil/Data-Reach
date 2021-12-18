@@ -7,6 +7,21 @@ use overload;
 
 our $VERSION    = '1.00';
 
+
+=begin TODO
+
+  - API for import() : include each_path() and map_paths()
+  - implement map_paths()
+  - change API for hint hash : which syntax ? ex use .. qw/:use_overloads/;
+                                                ? or qw/!use_overloads/ ... confusing with no ...
+
+=end TODO
+
+=cut
+
+#======================================================================
+# implementation for reach()
+#======================================================================
 # main entry point
 sub reach ($@) {
   my ($root, @path) = @_;
@@ -75,7 +90,7 @@ sub _step_down_obj {
   if ($use_overloads) {
     return $obj->[$key] if overload::Method($obj, '@{}')
                         && $key =~ /^-?\d+$/;
-    return $obj->{$key} if overload::Method($obj, '%{}');
+    return $obj->{$key} if overload::Method($obj, '%{}');$hint_hash->{'Data::Reach::use_overloads'} // 1; # defaulto
   }
 
   # choice 3 : use the object's internal representation -- active by default
@@ -86,6 +101,108 @@ sub _step_down_obj {
     croak "cannot reach '$key' within an object of class " . ref $obj;
   }
 }
+
+
+
+#======================================================================
+# implementation for each_path()
+#======================================================================
+
+sub each_path (+;$) {
+  my ($tree, $level) = @_;
+  $level //= -1;
+
+
+  my $hint_hash = (caller(1))[10];
+
+
+  my $is_consumed;
+
+  my $reftype = reftype $tree;
+
+  if (!$reftype || !$level || $reftype eq 'REF' || $reftype eq 'SCALAR' || $reftype eq 'REGEXP') {
+    return sub { return $is_consumed++ ? () : ([], $tree) };
+  }
+  elsif ($reftype eq 'HASH') {
+    return sub {$is_consumed++ ? () : ([], {})}
+      if !(keys %$tree) && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+
+    my $each_subtree;
+    my $k;
+    return sub {
+      while (1) {
+        if (!$each_subtree) {
+          if (!$is_consumed && (($k, my $v) = each %$tree)) {
+            $each_subtree = each_path($v, $level-1);
+          }
+          else {
+            $is_consumed++;
+            return;
+          }
+        }
+        if (my ($path, $subval) = $each_subtree->()) {
+          return ([$k, @$path], $subval);
+        }
+        else {
+          $each_subtree = undef;
+          $k = undef;
+        }
+      }
+    }
+  }
+
+  elsif ($reftype eq 'ARRAY') {
+    return sub {$is_consumed++ ? () : ([], [])}
+      if !@$tree && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+
+    my $i = 0;
+    my $each_subtree;
+    return sub {
+      while (1) {
+        if (!$each_subtree) {
+          if (!$is_consumed && $i < @$tree) {
+            $each_subtree = each_path($tree->[$i], $level-1);
+          }
+          else {
+            $is_consumed++;
+            return;
+          }
+        }
+        if (my ($path, $subval) = $each_subtree->()) {
+          return ([$i, @$path], $subval);
+        }
+        else {
+          $each_subtree = undef;
+          $i++;
+        }
+      }
+    }
+  }
+  else {
+    die "cannot each_path into $reftype";
+  }
+}
+
+
+sub map_paths (&+;$) {
+  my ($coderef, $tree, $level)= @_;
+
+  
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -118,12 +235,22 @@ sub import {
       $methods = join $;, @$methods if (ref $methods || '') eq 'ARRAY';
       $^H{"Data::Reach::call_method"} = $methods;
     }
-    elsif ($option eq 'peek_blessed') {
-      $^H{"Data::Reach::peek_blessed"} = 1;
+    elsif ($option =~ /^(?:peek_blessed|use_overloads|keep_empty_subtrees)$/) {
+      $^H{"Data::Reach::$option"} = 1;
     }
-    elsif ($option eq 'use_overloads') {
-      $^H{"Data::Reach::use_overloads"} = 1;
+
+
+    # TMP HACK : direct export for 'each_path' or 'map_paths'
+    elsif ($option eq 'each_path') {
+      no strict 'refs';
+      *{$pkg . "::each_path"} = \&each_path;
     }
+    elsif ($option eq 'map_paths') {
+      no strict 'refs';
+      *{$pkg . "::map_paths"} = \&map_paths;
+    }
+
+
     else {
       croak "use Data::Reach : unknown option : $option";
     }
