@@ -33,7 +33,9 @@ is walk_down($data, qw/foo 3/),             1234,          'multistep short';
 sub dies_ok (&$;$) {
   my ($coderef, $regex, $message) = @_;
   eval {$coderef->()};
-  like $@, $regex, $message;
+  my $err = $@;
+
+  like $err, $regex, $message;
 }
 
 # lexically-scoped "use Data::Reach" should not mess up with imported names

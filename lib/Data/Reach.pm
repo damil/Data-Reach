@@ -104,6 +104,33 @@ sub _step_down_obj {
 }
 
 
+#======================================================================
+# map_paths()
+#======================================================================
+
+sub map_paths (&+;$$); # must declare before the sub definition below, because of recursive call
+sub map_paths (&+;$$) {
+  my ($coderef, $tree, $max_depth, $path)= @_;
+  $max_depth  //= -1;
+  $path       //= [];
+  my $hint_hash = (caller(1))[10];
+  my $reftype   = reftype $tree;
+
+
+  if (!$reftype || !$max_depth || $reftype !~ /^(?:HASH|ARRAY)$/) {
+    return $coderef->(@$path, $tree);
+  }
+  elsif ($reftype eq 'HASH') {
+    my @k = keys %$tree;
+    return $coderef->(@$path, {}) if !@k  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+    return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
+  }
+  elsif ($reftype eq 'ARRAY') {
+    return $coderef->(@$path, []) if !@$tree  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+    return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
+  }
+}
+
 
 #======================================================================
 # each_path()
@@ -164,60 +191,37 @@ sub each_path (+;$) {
 
 
 
-#======================================================================
-# map_paths()
-#======================================================================
-
-sub map_paths (&+;$$); # must declare before the sub definition below, because of recursive call
-sub map_paths (&+;$$) {
-  my ($coderef, $tree, $max_depth, $path)= @_;
-  $max_depth  //= -1;
-  $path       //= [];
-  my $hint_hash = (caller(1))[10];
-  my $reftype   = reftype $tree;
-
-
-  if (!$reftype || !$max_depth || $reftype !~ /^(?:HASH|ARRAY)$/) {
-    return $coderef->(@$path, $tree);
-  }
-  elsif ($reftype eq 'HASH') {
-    my @k = keys %$tree;
-    return $coderef->(@$path, {}) if !@k  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
-    return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
-  }
-  elsif ($reftype eq 'ARRAY') {
-    return $coderef->(@$path, []) if !@$tree  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
-    return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
-  }
-}
-
-
 
 #======================================================================
 # import and unimport
 #======================================================================
 
-# the 'import' method does 2 things : a) export the 'reach' function,
+# the 'import' method does 2 things : a) export the required functions,
 # like the regular Exporter, but possibly with a change of name;
 # b) implement optional changes to the algorithm, lexically scoped
 # through the %^H hint hash (see L<perlpragma>).
 
-my %seen_pkg; # remember which packages we already exported into
+my $exported_functions = qr/^(:?reach|each_path|map_paths)$/) {
+my $hint_options       = qr/^(?:peek_blessed|use_overloads|keep_empty_subtrees)$/;
 
 sub import {
   my $class = shift;
   my $pkg = caller;
-  my $export_as;
 
-  # cheap parsing of import parameters
+  my %export_as 
+    = map {($_ => $_)} qw/reach each_path map_paths/ if !@_;  # default
+  my $last_func  = 'reach';                                   # default
+
+  # loop for cheap parsing of import parameters
   while (my $option = shift) {
-    if ($option eq 'reach') {
-      $export_as = 'reach';
+    if ($option =~ $exported_functions) {
+      $export_as{$option} = $option;
+      $last_func          = $option;
     }
     elsif ($option eq 'as') {
-      $export_as = shift;
-      defined $export_as
+      my $alias = shift
         or croak "use Data::Reach : no export name after 'as'";
+      $export_as{$last_func} = $alias;
     }
     elsif ($option eq 'call_method') {
       my $methods = shift
@@ -225,39 +229,18 @@ sub import {
       $methods = join $;, @$methods if (ref $methods || '') eq 'ARRAY';
       $^H{"Data::Reach::call_method"} = $methods;
     }
-    elsif ($option =~ /^(?:peek_blessed|use_overloads|keep_empty_subtrees)$/) {
+    elsif ($option =~ $hint_options) {
       $^H{"Data::Reach::$option"} = 1;
     }
-
-
-    # TMP HACK : direct export for 'each_path' or 'map_paths'
-    elsif ($option eq 'each_path') {
-      no strict 'refs';
-      *{$pkg . "::each_path"} = \&each_path;
-    }
-    elsif ($option eq 'map_paths') {
-      no strict 'refs';
-      *{$pkg . "::map_paths"} = \&map_paths;
-    }
-
-
     else {
       croak "use Data::Reach : unknown option : $option";
     }
   }
 
-  # export the 'reach' function into caller's package, under name $export_as
-  if (! exists $seen_pkg{$pkg}) {
-    $export_as //= 'reach'; # default export name
-    if ($export_as) {       # because it could be an empty string
-      no strict 'refs';
-      *{$pkg . "::" . $export_as} = \&reach;
-    }
-    $seen_pkg{$pkg} = $export_as;
-  }
-  elsif ($export_as && $export_as ne $seen_pkg{$pkg}) {
-    carp "ignored request to import Data::Reach::reach as '$export_as' into "
-       . "package $pkg, because it was already imported as '$seen_pkg{$pkg}'!";
+  # export into caller's package, under the required alias names
+  while (my ($func, $alias) = each %export_as) {
+    no strict 'refs';
+    *{$pkg . "::" . $alias} = \&$func if $alias;
   }
 }
 
@@ -265,7 +248,7 @@ sub import {
 sub unimport {
   my $class = shift;
   while (my $option = shift) {
-    $^H{"Data::Reach::$option"} = '';
+    $^H{"Data::Reach::$option"} = '' if $option =~ $hint_options;
     # NOTE : mark with a false value, instead of deleting from the
     # hint hash, in order to distinguish options explicitly turned off
     # from default options
@@ -280,16 +263,25 @@ __END__
 
 =head1 NAME
 
-Data::Reach - Walk down a datastructure, without autovivification
+Data::Reach - Walk down or iterate through a nested datastructure
 
 =head1 SYNOPSIS
 
-    # regular use
+    # reach a subtree or a leaf under a nested datastructure
     use Data::Reach;
-    my $node = reach $data_tree, @path;
+    my $node = reach $data_tree, @path; # @path may contain a mix of hash keys and array indices
+
+    # do something with all paths through the datastructure ..
+    my @result = map_paths { my $val = pop; do_something_with(\@_, $val)} $data_tree;
+
+    # .. or loop through all paths
+    my $next_path = each_path $data_tree;
+    while (my ($path, $val) = $next_path->()) {
+      do_something_with($path, $val);
+    }
 
     # import under a different name
-    use Data::Reach as => 'walk_down';
+    use Data::Reach qw/reach as walk_down/;
     my $node = walk_down $data_tree, @path;
 
     # optional changes of algorithm, lexically scoped
@@ -301,20 +293,43 @@ Data::Reach - Walk down a datastructure, without autovivification
 
 =head1 DESCRIPTION
 
-The C<reach> function walks down a nested datastructure of hashrefs
-and arrayrefs, choosing the next subnode at each step according to the
-next key supplied in C<@path>. If there is no such sequence of
-subnodes, C<undef> is returned. No autovivification nor any writing
-into the datastructure is ever performed. Missing data merely returns
-C<undef>, while wrong use of data (for example looking into an
-arrayref with a non-numerical index) generates an exception.  Blessed
-objects within the datastructure are generally treated just like raw,
-unblessed datastructures; however that behaviour can be changed
-through pragma options.
+Perl supports nested datastructures : a hash may contain references to
+other hashes or to arrays, which in turn may contain further references
+to deeper structures -- see L<perldsc>. Walking down through such
+structures usually involves nested loops, and possibly some tests on
+C<ref $subtree> for finding out if the next level is an arrayref or a hashref.
 
-B<Note>: this code doesn't do much, actually; but after having copy-pasted
-similar stuff into several of my applications, I finally decided that
-it was worth a CPAN distribution on its own. The L</"SEE ALSO"> section
+The present module offers some utilities for easier handling of nested
+datastructures :
+
+=over
+
+=item *
+
+the C<reach> function finds a subtree or a leaf according to a given
+C<@path> -- a list of hash keys or array indices. If there is no data
+corresponding to that path, C<undef> is returned, without any autovivification
+within the tree.
+
+=item *
+
+the C<map_paths> function applies a given code reference to all paths within the nested
+datastructure.
+
+
+=item *
+
+the C<each_path> function returns an iterator over the nested datastructure; it can be
+used in the same spirit as an C<each> statement over a simple hash, except that it will
+walk through all different paths within the nested datastructure
+
+=back
+
+
+
+
+
+The L</"SEE ALSO"> section
 below discusses some alternative implementations.
 
 
@@ -371,9 +386,49 @@ to a scalar, reference to a reference, etc.), an error is generated.
 
 =back
 
+No autovivification nor any writing
+into the datastructure is ever performed. Missing data merely returns
+C<undef>, while wrong use of data (for example looking into an
+arrayref with a non-numerical index) generates an exception.
+
 By default, blessed objects are treated just like raw, unblessed
 datastructures; however that behaviour can be changed through
 pragma options, as described below.
+
+
+=head2 map_paths
+
+  my @result = map_paths { ... } $data_tree [, $max_depth];
+
+Applies the given block to each path within C<$data_tree>, returning the list
+of collected results. The value of C<@_> within the block corresponds to the
+sequence of hash keys or array indices that were traversed, followed by the value
+of the leaf node. Hence, for a C<$data_tree> of shape :
+
+  { foo => [ undef,
+             'abc',
+             {bar => {buz => 987}},
+             1234,
+            ],
+    empty_slot  => undef,
+    qux         => 'qux',  }
+
+the block will be called six times, with the following lists in C<@_>
+
+   ('empty_slot,', undef)
+   ('foo', 0, undef)
+   ('foo', 1, 'abc')
+   ('foo', 2, 'bar', 'buz', 987)
+   ('foo', 3, 1234')
+   ('qux', 'qux')
+
+[CONTINUE HERE]
+
+
+
+
+
+
 
 
 =head1 IMPORT INTERFACE
