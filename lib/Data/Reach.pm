@@ -110,85 +110,55 @@ sub _step_down_obj {
 #======================================================================
 
 sub each_path (+;$) {
-  my ($tree, $level) = @_;
-  $level //= -1;
-
+  my ($tree, $max_depth) = @_;
+  $max_depth //= -1;
   my $hint_hash = (caller(1))[10];
 
-  # when $tree has no depth, return a sub that returns $tree at first call, () at later calls
+  # local boolean variable to avoid returning the same result multiple times
   my $is_consumed;
+
+  # closure to be used at tree leaves
   my $leaf = sub {return $is_consumed++ ? () : ([], $tree)};
 
-  # local vars for keeping intermediate state used by closures
-  my $next_subpath;
-  my $path_item;
-
-  # 3 possible behaviours, depending on the kind of reference of $tree
-  my $reftype = reftype $tree;
-
-  # 1) behaviour for data leaves
-  if (   !$reftype                                # if $tree is not a reference
-      || !$level                                  # .. or if we reached the maximum required depth
-      || $reftype =~ /^(?:REF|SCALAR|REGEXP)$/    # .. of if $tree is a reference that has no depth
-     ) {
+  # either this tree is a leaf, or we must recurse into subtrees
+  my $reftype     = reftype $tree;
+  my $has_subtree = $reftype && ($reftype eq 'HASH' || $reftype eq 'ARRAY');
+  if (!$has_subtree || !$max_depth) {
     return $leaf;
   }
-
-  #2) behaviour for hashrefs
-  elsif ($reftype eq 'HASH') {
-    my @k = sort keys %$tree; # THINK : sorting should be optional
-    return $leaf if !@k && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
-    return sub {
-      while (1) {
-        if (!$next_subpath) {
-          if (!$is_consumed && @k) {
-            $path_item    = shift @k;
-            $next_subpath = each_path($tree->{$path_item}, $level-1);
-          }
-          else {
-            $is_consumed++;
-            return;
-          }
-        }
-        if (my ($subpath, $subval) = $next_subpath->()) {
-          return ([$path_item, @$subpath], $subval);
-        }
-        else {
-          $next_subpath = undef;
-          $path_item    = undef;
-        }
-      }
-    }
-  }
-
-  # 3) behaviour for arrayrefs
-  elsif ($reftype eq 'ARRAY') {
-    return $leaf if !@$tree && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
-    $path_item = 0;
-    return sub {
-      while (1) {
-        if (!$next_subpath) {
-          if (!$is_consumed && $path_item < @$tree) {
-            $next_subpath = each_path($tree->[$path_item], $level-1);
-          }
-          else {
-            $is_consumed++;
-            return;
-          }
-        }
-        if (my ($subpath, $subval) = $next_subpath->()) {
-          return ([$path_item, @$subpath], $subval);
-        }
-        else {
-          $next_subpath = undef;
-          $path_item++;
-        }
-      }
-    }
-  }
-
   else {
-    die "cannot each_path into $reftype";
+    my $i = 0;                                         # index into subtrees
+    my @k = sort keys %$tree if $reftype eq 'HASH';    # keys -- if the subtree is a hash
+    my $n_subtrees = $reftype eq 'HASH' ? @k : @$tree; # number of subtrees
+    my $next_subpath;                                  # iterator into next subtree
+
+    if (!$n_subtrees && $hint_hash->{'Data::Reach::keep_empty_subtrees'}) {
+      return $leaf;
+    }
+    else {
+      return sub {
+        while (1) {
+          if (!$next_subpath) {
+            if (!$is_consumed && $i < $n_subtrees) {
+              my $subtree   = $reftype eq 'HASH' ? $tree->{$k[$i]} : $tree->[$i];
+              $next_subpath = each_path($subtree, $max_depth-1);
+            }
+            else {
+              $is_consumed++;
+              return;
+            }
+          }
+          if (my ($subpath, $subval) = $next_subpath->()) {
+            my $path_item = $reftype eq 'HASH' ? $k[$i] : $i;
+            return ([$path_item, @$subpath], $subval);
+          }
+          else {
+            $next_subpath = undef;
+            $i++;
+          }
+        }
+      }
+    }
   }
 }
 
@@ -198,31 +168,26 @@ sub each_path (+;$) {
 # map_paths()
 #======================================================================
 
-sub map_paths (&+;$$); # must declare before sub definition because of recursive call
+sub map_paths (&+;$$); # must declare before the sub definition below, because of recursive call
 sub map_paths (&+;$$) {
-  my ($coderef, $tree, $level, $path)= @_;
-
-  $level //= -1;
-  $path  //= [];
-
+  my ($coderef, $tree, $max_depth, $path)= @_;
+  $max_depth  //= -1;
+  $path       //= [];
   my $hint_hash = (caller(1))[10];
-  my $reftype = reftype $tree;
+  my $reftype   = reftype $tree;
 
 
-  if (!$reftype || !$level || $reftype eq 'REF' || $reftype eq 'SCALAR' || $reftype eq 'REGEXP') {
+  if (!$reftype || !$max_depth || $reftype !~ /^(?:HASH|ARRAY)$/) {
     return $coderef->(@$path, $tree);
   }
   elsif ($reftype eq 'HASH') {
     my @k = keys %$tree;
     return $coderef->(@$path, {}) if !@k  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
-    return map {map_paths \&$coderef, $tree->{$_}, $level-1, [@$path, $_]} @k;
+    return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
   }
   elsif ($reftype eq 'ARRAY') {
     return $coderef->(@$path, []) if !@$tree  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
-    return map {map_paths \&$coderef, $tree->[$_], $level-1, [@$path, $_]} 0 .. $#$tree;
-  }
-  else {
-    die "cannot walk into $reftype at position " . join(",", @$path);
+    return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
   }
 }
 
@@ -244,8 +209,7 @@ sub import {
   my $pkg = caller;
   my $export_as;
 
-  # cheap parsing of import parameters -- I wish I could implement that
-  # with given/when, but unfortunately those constructs were dropped in v5.18.
+  # cheap parsing of import parameters
   while (my $option = shift) {
     if ($option eq 'reach') {
       $export_as = 'reach';
