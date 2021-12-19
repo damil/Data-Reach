@@ -75,11 +75,11 @@ sub _step_down_obj {
 
   # pragmata that may modify our algorithm -- see L<perlpragma>
   my $hint_hash = (caller(1))[10];
-  my $use_overloads = $hint_hash->{'Data::Reach::use_overloads'} // 1; # default
-  my $peek_blessed  = $hint_hash->{'Data::Reach::peek_blessed'}  // 1; # default
+  my $use_overloads = $hint_hash->{'Data::Reach/use_overloads'} // 1; # default
+  my $peek_blessed  = $hint_hash->{'Data::Reach/peek_blessed'}  // 1; # default
 
   # choice 1 : call named method in object
-  my @call_method = split $;, $hint_hash->{'Data::Reach::call_method'} || '';
+  my @call_method = split $;, $hint_hash->{'Data::Reach/call_method'} || '';
  METH_NAME:
   foreach my $meth_name (@call_method) {
     my $meth =$obj->can($meth_name)
@@ -91,7 +91,7 @@ sub _step_down_obj {
   if ($use_overloads) {
     return $obj->[$key] if overload::Method($obj, '@{}')
                         && $key =~ /^-?\d+$/;
-    return $obj->{$key} if overload::Method($obj, '%{}');$hint_hash->{'Data::Reach::use_overloads'} // 1; # defaulto
+    return $obj->{$key} if overload::Method($obj, '%{}');$hint_hash->{'Data::Reach/use_overloads'} // 1; # defaulto
   }
 
   # choice 3 : use the object's internal representation -- active by default
@@ -122,11 +122,11 @@ sub map_paths (&+;$$) {
   }
   elsif ($reftype eq 'HASH') {
     my @k = keys %$tree;
-    return $coderef->(@$path, {}) if !@k  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+    return $coderef->(@$path, {}) if !@k  && $hint_hash->{'Data::Reach/keep_empty_subtrees'};
     return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
   }
   elsif ($reftype eq 'ARRAY') {
-    return $coderef->(@$path, []) if !@$tree  && $hint_hash->{'Data::Reach::keep_empty_subtrees'};
+    return $coderef->(@$path, []) if !@$tree  && $hint_hash->{'Data::Reach/keep_empty_subtrees'};
     return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
   }
 }
@@ -159,7 +159,7 @@ sub each_path (+;$) {
     my $n_subtrees = $reftype eq 'HASH' ? @k : @$tree; # number of subtrees
     my $next_subpath;                                  # iterator into next subtree
 
-    if (!$n_subtrees && $hint_hash->{'Data::Reach::keep_empty_subtrees'}) {
+    if (!$n_subtrees && $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
       return $leaf;
     }
     else {
@@ -201,7 +201,7 @@ sub each_path (+;$) {
 # b) implement optional changes to the algorithm, lexically scoped
 # through the %^H hint hash (see L<perlpragma>).
 
-my $exported_functions = qr/^(:?reach|each_path|map_paths)$/) {
+my $exported_functions = qr/^(:?reach|each_path|map_paths)$/;
 my $hint_options       = qr/^(?:peek_blessed|use_overloads|keep_empty_subtrees)$/;
 
 sub import {
@@ -227,10 +227,10 @@ sub import {
       my $methods = shift
         or croak "use Data::Reach : no method name after 'call_method'";
       $methods = join $;, @$methods if (ref $methods || '') eq 'ARRAY';
-      $^H{"Data::Reach::call_method"} = $methods;
+      $^H{"Data::Reach/call_method"} = $methods;
     }
     elsif ($option =~ $hint_options) {
-      $^H{"Data::Reach::$option"} = 1;
+      $^H{"Data::Reach/$option"} = 1;
     }
     else {
       croak "use Data::Reach : unknown option : $option";
@@ -248,7 +248,7 @@ sub import {
 sub unimport {
   my $class = shift;
   while (my $option = shift) {
-    $^H{"Data::Reach::$option"} = '' if $option =~ $hint_options;
+    $^H{"Data::Reach/$option"} = '' if $option =~ $hint_options;
     # NOTE : mark with a false value, instead of deleting from the
     # hint hash, in order to distinguish options explicitly turned off
     # from default options
@@ -424,6 +424,10 @@ the block will be called six times, with the following lists in C<@_>
 
 [CONTINUE HERE]
 
+
+=head2 each_path
+
+[TODO]
 
 
 
