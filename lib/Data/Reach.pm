@@ -116,12 +116,12 @@ sub map_paths (&+;$$) {
 
 
   if (!$reftype || !$max_depth || $reftype !~ /^(?:HASH|ARRAY)$/) {
-    return $coderef->(@$path, $tree);
+    for ($tree) {return $coderef->(@$path)};
   }
   elsif ($reftype eq 'HASH') {
     my @k = keys %$tree;
     if (!@k  && $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
-      return $coderef->(@$path, {});
+      for ($tree) {return $coderef->(@$path)};
     }
     else {
       return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
@@ -129,7 +129,7 @@ sub map_paths (&+;$$) {
   }
   elsif ($reftype eq 'ARRAY') {
     if (!@$tree  && $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
-      return $coderef->(@$path, []);
+      for ($tree) {return $coderef->(@$path)};
     }
     else {
       return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;

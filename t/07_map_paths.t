@@ -23,37 +23,43 @@ my $data = {
 
 
 {
-  my @all_paths    = map_paths {join ",", @_} $data;
-  my @sorted_paths = sort @all_paths;
-  is_deeply([@sorted_paths[0..5]],
-            ['empty_slot,',
-             'foo,0,',
-             'foo,1,abc',
-             'foo,2,bar,buz,987',
-             'foo,3,1234',
-             'qux,qux'],
-            "initial paths");
-  like $sorted_paths[6], qr/^refref,REF\(/,       'refref';
-  like $sorted_paths[7], qr/^stringref,SCALAR\(/, 'stringref';
+  my %all_paths  = map_paths {join(",", @_) => $_} $data;
+  my $stringref  = delete $all_paths{stringref};
+  my $refref     = delete $all_paths{refref};
+
+
+  is_deeply \%all_paths,
+            {'empty_slot'    => undef,
+             'foo,0'         => undef,
+             'foo,1'         => 'abc',
+             'foo,2,bar,buz' => 987,
+             'foo,3'         => 1234,
+             'qux'           => 'qux', },  "initial paths";
+  like $stringref, qr/^SCALAR\(/,          'stringref';
+  like $refref,    qr/^REF\(/,             'refref';
 }
 
 
 {
   use Data::Reach qw/keep_empty_subtrees/;
-  my @all_paths = map_paths {join ",", @_} $data;
-  my @sorted_paths = sort @all_paths;
-  like $sorted_paths[0], qr/^empty_array,ARRAY\(/, "empty_array";
-  like $sorted_paths[1], qr/^empty_hash,HASH\(/,   "empty_hash";
-  is_deeply([@sorted_paths[2..7]],
-            ['empty_slot,',
-             'foo,0,',
-             'foo,1,abc',
-             'foo,2,bar,buz,987',
-             'foo,3,1234',
-             'qux,qux'],
-            "initial paths");
-  like $sorted_paths[8], qr/^refref,REF\(/,       'refref';
-  like $sorted_paths[9], qr/^stringref,SCALAR\(/, 'stringref';
+  my %all_paths  = map_paths {join(",", @_) => $_} $data;
+  my $stringref  = delete $all_paths{stringref};
+  my $refref     = delete $all_paths{refref};
+  my $empty_array= delete $all_paths{empty_array};
+  my $empty_hash = delete $all_paths{empty_hash};
+
+
+  is_deeply \%all_paths,
+            {'empty_slot'    => undef,
+             'foo,0'         => undef,
+             'foo,1'         => 'abc',
+             'foo,2,bar,buz' => 987,
+             'foo,3'         => 1234,
+             'qux'           => 'qux', }, "initial paths";
+  like $stringref,   qr/^SCALAR\(/,       'stringref';
+  like $refref,      qr/^REF\(/,          'refref';
+  like $empty_array, qr/^ARRAY\(/,        "empty_array";
+  like $empty_hash,  qr/^HASH\(/,         "empty_hash";
 }
 
 
