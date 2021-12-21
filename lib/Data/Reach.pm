@@ -10,9 +10,7 @@ our $VERSION    = '1.00';
 
 =begin TODO
 
-  - API for import() : include each_path() and map_paths()
   - each_path() should respect :peek_blessed
-  - implement map_paths()
   - change API for hint hash : which syntax ? ex use .. qw/:use_overloads/;
                                                 ? or qw/!use_overloads/ ... confusing with no ...
 
@@ -91,7 +89,7 @@ sub _step_down_obj {
   if ($use_overloads) {
     return $obj->[$key] if overload::Method($obj, '@{}')
                         && $key =~ /^-?\d+$/;
-    return $obj->{$key} if overload::Method($obj, '%{}');$hint_hash->{'Data::Reach/use_overloads'} // 1; # defaulto
+    return $obj->{$key} if overload::Method($obj, '%{}');
   }
 
   # choice 3 : use the object's internal representation -- active by default
@@ -108,7 +106,7 @@ sub _step_down_obj {
 # map_paths()
 #======================================================================
 
-sub map_paths (&+;$$); # must declare before the sub definition below, because of recursive call
+sub map_paths (&+;$$); # the prototype must be declared beforehand, because the sub is recursive
 sub map_paths (&+;$$) {
   my ($coderef, $tree, $max_depth, $path)= @_;
   $max_depth  //= -1;
@@ -122,12 +120,20 @@ sub map_paths (&+;$$) {
   }
   elsif ($reftype eq 'HASH') {
     my @k = keys %$tree;
-    return $coderef->(@$path, {}) if !@k  && $hint_hash->{'Data::Reach/keep_empty_subtrees'};
-    return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
+    if (!@k  && $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
+      return $coderef->(@$path, {});
+    }
+    else {
+      return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
+    }
   }
   elsif ($reftype eq 'ARRAY') {
-    return $coderef->(@$path, []) if !@$tree  && $hint_hash->{'Data::Reach/keep_empty_subtrees'};
-    return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
+    if (!@$tree  && $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
+      return $coderef->(@$path, []);
+    }
+    else {
+      return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
+    }
   }
 }
 
@@ -422,13 +428,22 @@ the block will be called six times, with the following lists in C<@_>
    ('foo', 3, 1234')
    ('qux', 'qux')
 
+The optional C<$max_depth> argument [BLABLA]
+
+[$data_tree can also be %data_tree or @data_tree]
+
 [CONTINUE HERE]
+
+[THINK : should we use @$_ instead of @? or both ? or $_ for the leaf value and @_ for the path ?]
 
 
 =head2 each_path
 
 [TODO]
 
+    my $next_path = each_path $data_tree;
+    while (my ($path, $val) = $next_path->()) {
+      do_something_with($path, $val);
 
 
 
