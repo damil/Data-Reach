@@ -112,29 +112,22 @@ sub map_paths (&+;$$) {
   $max_depth  //= -1;
   $path       //= [];
   my $hint_hash = (caller(1))[10];
-  my $reftype   = reftype $tree;
+  my $reftype   = reftype $tree // '';
 
+  my $ignore_empty_subtrees = ! $hint_hash->{'Data::Reach/keep_empty_subtrees'};
 
-  if (!$reftype || !$max_depth || $reftype !~ /^(?:HASH|ARRAY)$/) {
-    for ($tree) {return $coderef->(@$path)};
-  }
-  elsif ($reftype eq 'HASH') {
-    my @k = keys %$tree;
-    if (!@k  && $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
-      for ($tree) {return $coderef->(@$path)};
+  # recursive cases
+  if ($max_depth) {
+    if ($reftype eq 'ARRAY' and (@$tree or $ignore_empty_subtrees)) {
+      return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
     }
-    else {
+    elsif ($reftype eq 'HASH' and (my @k = keys %$tree or $ignore_empty_subtrees)) {
       return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
     }
   }
-  elsif ($reftype eq 'ARRAY') {
-    if (!@$tree  && $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
-      for ($tree) {return $coderef->(@$path)};
-    }
-    else {
-      return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
-    }
-  }
+
+  # base case
+  for ($tree) {return $coderef->(@$path)}; # @_ contains the path, $_ contains the leaf
 }
 
 

@@ -3,7 +3,7 @@ use strict;
 use warnings;
 no warnings 'uninitialized';
 use Test::More tests => 9;
-use Test::NoWarnings;
+#use Test::NoWarnings;
 use Data::Reach 'map_paths';
 
 # test data
