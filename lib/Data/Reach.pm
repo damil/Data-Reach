@@ -76,9 +76,9 @@ sub _step_down_obj {
   my $peek_blessed  = $hint_hash->{'Data::Reach/peek_blessed'}  // 1; # default
 
   # choice 1 : call named method in object
-  my @call_method = split $;, $hint_hash->{'Data::Reach/reach_method'} || '';
+  my @reach_method = split $;, $hint_hash->{'Data::Reach/reach_method'} || '';
  METH_NAME:
-  foreach my $meth_name (@call_method) {
+  foreach my $meth_name (@reach_method) {
     my $meth =$obj->can($meth_name)
       or next METH_NAME;
     return $obj->$meth($key);
@@ -262,7 +262,7 @@ __END__
 
 =head1 NAME
 
-Data::Reach - Walk down or iterate through a nested datastructure
+Data::Reach - Walk down or iterate through a nested Perl datastructure
 
 =head1 SYNOPSIS
 
@@ -280,7 +280,7 @@ Data::Reach - Walk down or iterate through a nested datastructure
     }
 
     # import under a different name
-    use Data::Reach qw/reach as walk_down/;
+    use Data::Reach reach => as => 'walk_down';
     my $node = walk_down $data_tree, @path;
 
     # optional changes of algorithm, lexically scoped
