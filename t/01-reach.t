@@ -69,7 +69,7 @@ is reach($data, qw/foo 3/), 1234,                  'peek_blessed true again';
 
 # option "reach_method"
 bless $data, 'RealClass'; # defined below
-{ use Data::Reach reach_method => [qw/dap dip dup/];
+{ use Data::Reach reach_method => 'dup';
   is reach($data, qw/foo/), "foofoo",              'reach_method arrayref';
   dies_ok sub {reach($data, qw/foo 3/)},
           qr/within a SCALAR/,                     'reach_method dup (2-steps)';

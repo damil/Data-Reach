@@ -5,6 +5,8 @@ use Carp         qw/carp croak/;
 use Scalar::Util qw/blessed reftype/;
 use overload;
 
+use Try::Tiny;
+
 our $VERSION    = '1.00';
 
 
@@ -76,16 +78,13 @@ sub _step_down_obj {
   my $peek_blessed  = $hint_hash->{'Data::Reach/peek_blessed'}  // 1; # default
 
   # choice 1 : call named method in object
-  my @reach_method = split $;, $hint_hash->{'Data::Reach/reach_method'} || '';
- METH_NAME:
-  foreach my $meth_name (@reach_method) {
-    my $meth =$obj->can($meth_name)
-      or next METH_NAME;
-    return $obj->$meth($key);
-  }
+  my $meth_name = $hint_hash->{'Data::Reach/reach_method'} || '';
+  return $obj->$meth_name($key) if $obj->can($meth_name);
 
   # choice 2 : use overloaded methods -- active by default
   if ($use_overloads) {
+    # overloaded array dereferencing is tried first but only if the key is numeric.
+    # Otherwise, the hash dereferencing is tried.
     return $obj->[$key] if overload::Method($obj, '@{}')
                         && $key =~ /^-?\d+$/;
     return $obj->{$key} if overload::Method($obj, '%{}');
@@ -123,7 +122,28 @@ sub map_paths (&+;$$$) {
       return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
     }
     elsif (blessed $tree) {
-      return _map_paths_obj($coderef, $tree, $max_depth, $path);
+      my $use_overloads = $hint_hash->{'Data::Reach/use_overloads'} // 1; # default
+      my $peek_blessed  = $hint_hash->{'Data::Reach/peek_blessed'}  // 1; # default
+
+      # try to call named method in object
+      if (my $meth_name = $hint_hash->{'Data::Reach/paths_method'}) {
+        if ($tree->can($meth_name)) {
+          my @paths = $tree->$meth_name();
+          return map {map_paths(\&$coderef, reach($tree, $_), $max_depth-1, [@$path, $_])} @paths;
+        }
+      }
+
+      # otherwise, try to use overloaded methods, or else use the object's internal representation (if allowed)
+     $recurse = $use_overloads && overload::Method($tree, '@{}') ? 'ARRAY'
+              : $use_overloads && overload::Method($tree, '%{}') ? 'HASH'
+              : $peek_blessed                                    ? reftype $tree
+              :                                                    undef;
+
+      # if all else failed, treat this object as an opaque leaf
+      $max_depth = 0 if !$recurse;
+
+      # recursive call
+      return map_paths(\&$coderef, $tree, $max_depth, $path, $recurse);
     }
   }
 
@@ -136,29 +156,6 @@ sub _map_paths_obj {
   my ($coderef, $tree, $max_depth, $path)= @_;
   my $hint_hash = (caller(1))[10];
 
-  my $use_overloads = $hint_hash->{'Data::Reach/use_overloads'} // 1; # default
-  my $peek_blessed  = $hint_hash->{'Data::Reach/peek_blessed'}  // 1; # default
-
-  # try to call named method in object
-  my @paths_method = split $;, $hint_hash->{'Data::Reach/paths_method'} || '';
-  foreach my $meth_name (@paths_method) {
-    if (my $meth =$tree->can($meth_name)) {
-      my @paths = $tree->$meth();
-      return map {map_paths(\&$coderef, reach($tree, $_), $max_depth-1, [@$path, $_])} @paths;
-    }
-  }
-
-  # otherwise, try to use overloaded methods, or else use the object's internal representation (if allowed)
-  my $recurse = $use_overloads && overload::Method($tree, '@{}') ? 'ARRAY'
-              : $use_overloads && overload::Method($tree, '%{}') ? 'HASH'
-              : $peek_blessed                                    ? reftype $tree
-              :                                                    undef;
-
-  # if all else failed, treat this object as an opaque leaf
-  $max_depth = 0 if !$recurse;
-
-  # handle this decision through a recursive call
-  return map_paths(\&$coderef, $tree, $max_depth, $path, $recurse);
 }
 
 
@@ -309,10 +306,14 @@ sub import {
     }
     elsif ($option =~ /^(reach|call)_method$/) {
       warn q{"use Data::Reach call_method => .." is obsolete; use "reach_method => .."} if $1 eq 'call';
-      my $methods = shift
+      my $method = shift
         or croak "use Data::Reach : no method name after 'reach_method'";
-      $methods = join $;, @$methods if (ref $methods || '') eq 'ARRAY';
-      $^H{"Data::Reach/reach_method"} = $methods;
+      $^H{"Data::Reach/reach_method"} = $method;
+    }
+    elsif ($option eq 'paths_method') {
+      my $method = shift
+        or croak "use Data::Reach : no method name after 'paths_method'";
+      $^H{"Data::Reach/paths_method"} = $method;
     }
     elsif ($option =~ $hint_options) {
       $^H{"Data::Reach/$option"} = 1;
@@ -672,27 +673,8 @@ You can find documentation for this module with the perldoc command.
     perldoc Data::Reach
 
 
-You can also look for information at:
+You can also look for information at L<https://metacpan.org/pod/Data::Reach>
 
-=over 4
-
-=item RT: CPAN's request tracker (report bugs here)
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Data-Reach>
-
-=item AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/Data-Reach>
-
-=item CPAN Ratings
-
-L<http://cpanratings.perl.org/d/Data-Reach>
-
-=item METACPAN
-
-L<https://metacpan.org/pod/Data::Reach>
-
-=back
 
 The source code is at
 L<https://github.com/damil/Data-Reach>.
@@ -700,7 +682,7 @@ L<https://github.com/damil/Data-Reach>.
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2015 Laurent Dami.
+Copyright 2015, 2022 Laurent Dami.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of the the Artistic License (2.0). You may obtain a

@@ -40,7 +40,7 @@ sub dies_ok (&$;$) {
 
 # lexically-scoped "use Data::Reach" should not mess up with imported names
 bless $data, 'RealClass'; # defined below
-{ use Data::Reach reach_method => [qw/dap dip dup/]; # no explicit import
+{ use Data::Reach reach_method => 'dup'; # no explicit import
   is walk_down($data, qw/foo/), "foofoo",              'call_method arrayref';
   dies_ok sub {walk_down($data, qw/foo 3/)},
           qr/within a SCALAR/,                         'call_method dup (2-steps)';
