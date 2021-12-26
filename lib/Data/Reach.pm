@@ -105,29 +105,63 @@ sub _step_down_obj {
 # map_paths()
 #======================================================================
 
-sub map_paths (&+;$$); # the prototype must be declared beforehand, because the sub is recursive
-sub map_paths (&+;$$) {
-  my ($coderef, $tree, $max_depth, $path)= @_;
+sub map_paths (&+;$$$); # the prototype must be declared beforehand, because the sub is recursive
+sub map_paths (&+;$$$) {
+  my ($coderef, $tree, $max_depth, $path, $recurse)= @_;
   $max_depth  //= -1;
   $path       //= [];                                        # only used for recursive calls
-  my $hint_hash = (caller(1))[10];
-  my $reftype   = reftype $tree // '';
+  $recurse    //= reftype $tree // '';                       # only used for recursive calls
 
+  my $hint_hash             = (caller(1))[10];
   my $ignore_empty_subtrees = ! $hint_hash->{'Data::Reach/keep_empty_subtrees'};
 
-  # recursive cases
   if ($max_depth) {
-    if ($reftype eq 'ARRAY' and (@$tree or $ignore_empty_subtrees)) {
+    if ($recurse eq 'ARRAY' and (@$tree or $ignore_empty_subtrees)) {
       return map {map_paths(\&$coderef, $tree->[$_], $max_depth-1, [@$path, $_])} 0 .. $#$tree;
     }
-    elsif ($reftype eq 'HASH' and (my @k = sort keys %$tree or $ignore_empty_subtrees)) {
+    elsif ($recurse eq 'HASH' and (my @k = sort keys %$tree or $ignore_empty_subtrees)) {
       return map {map_paths(\&$coderef, $tree->{$_}, $max_depth-1, [@$path, $_])} @k;
+    }
+    elsif (blessed $tree) {
+      return _map_paths_obj($coderef, $tree, $max_depth, $path);
     }
   }
 
   # base case
   for ($tree) {return $coderef->(@$path)};                   # @_ contains the path, $_ contains the leaf
 }
+
+
+sub _map_paths_obj {
+  my ($coderef, $tree, $max_depth, $path)= @_;
+  my $hint_hash = (caller(1))[10];
+
+  my $use_overloads = $hint_hash->{'Data::Reach/use_overloads'} // 1; # default
+  my $peek_blessed  = $hint_hash->{'Data::Reach/peek_blessed'}  // 1; # default
+
+  # try to call named method in object
+  my @paths_method = split $;, $hint_hash->{'Data::Reach/paths_method'} || '';
+  foreach my $meth_name (@paths_method) {
+    if (my $meth =$tree->can($meth_name)) {
+      my @paths = $tree->$meth();
+      return map {map_paths(\&$coderef, reach($tree, $_), $max_depth-1, [@$path, $_])} @paths;
+    }
+  }
+
+  # otherwise, try to use overloaded methods, or else use the object's internal representation (if allowed)
+  my $recurse = $use_overloads && overload::Method($tree, '@{}') ? 'ARRAY'
+              : $use_overloads && overload::Method($tree, '%{}') ? 'HASH'
+              : $peek_blessed                                    ? reftype $tree
+              :                                                    undef;
+
+  # if all else failed, treat this object as an opaque leaf
+  $max_depth = 0 if !$recurse;
+
+  # handle this decision through a recursive call
+  return map_paths(\&$coderef, $tree, $max_depth, $path, $recurse);
+}
+
+
 
 
 #======================================================================
@@ -138,23 +172,75 @@ sub each_path (+;$) {
   my ($tree, $max_depth) = @_;
   $max_depth //= -1;
   my $hint_hash = (caller(1))[10];
+  my $use_overloads = $hint_hash->{'Data::Reach/use_overloads'} // 1; # default
+  my $peek_blessed  = $hint_hash->{'Data::Reach/peek_blessed'}  // 1; # default
 
   # local boolean variable to avoid returning the same result multiple times
-  my $is_consumed;
+  my $is_consumed = 0;
 
   # closure to be used at tree leaves
   my $leaf = sub {return $is_consumed++ ? () : ([], $tree)};
 
+
+  my $recurse;
+
+  if (blessed $tree) {
+    # try to use one of a supplied "paths_method()"
+    my @paths_method = split $;, $hint_hash->{'Data::Reach/paths_method'} || '';
+    foreach my $meth_name (@paths_method) {
+      if (my $meth =$tree->can($meth_name)) {
+        my @k = $tree->$meth();
+        my $i = 0;                                               # index into subtrees
+        my $n_subtrees = @k;
+        my $next_subpath;                                        # iterator into next subtree
+
+        return sub {
+          while (1) {
+            if (!$next_subpath) { # if there is no current iterator
+              if (!$is_consumed && $i < $n_subtrees) { # if there is a chance to get a new iterator
+                my $subtree   = reach $tree, $k[$i];
+                $next_subpath = each_path($subtree, $max_depth-1); # build an iterator on next subtree
+              }
+              else {            # end of data
+                $is_consumed++;
+                return ();
+              }
+            }
+            if (my ($subpath, $subval) = $next_subpath->()) { # try to get content from the current iterator
+              my $path_item = $k[$i];
+              return ([$path_item, @$subpath], $subval); # found a path, return it
+            }
+            else {         # mark that the iterator on this subtree ..
+              $next_subpath = undef; # .. is finished and move to the next data item
+              $i++;
+            }
+          }
+        };
+      }
+    }
+
+
+    # otherwise, try to use overloaded methods, or else use the object's internal representation (if allowed)
+    $recurse = $use_overloads && overload::Method($tree, '@{}') ? 'ARRAY'
+             : $use_overloads && overload::Method($tree, '%{}') ? 'HASH'
+             : $peek_blessed                                    ? reftype $tree // ''
+             :                                                    '';
+  }
+  else {
+    $recurse = reftype $tree // '';
+  }
+
+
+
   # either this tree is a leaf, or we must recurse into subtrees
-  my $reftype     = reftype $tree;
-  my $has_subtree = $reftype && ($reftype eq 'HASH' || $reftype eq 'ARRAY');
+  my $has_subtree = $recurse eq 'HASH' || $recurse eq 'ARRAY';
   if (!$has_subtree || !$max_depth) {
     return $leaf;
   }
   else {
     my $i = 0;                                               # index into subtrees
-    my @k = sort keys %$tree if $reftype eq 'HASH';          # keys -- if the subtree is a hash
-    my $n_subtrees = $reftype eq 'HASH' ? @k : @$tree;       # number of subtrees
+    my @k = sort keys %$tree if $recurse eq 'HASH';          # keys -- if the subtree is a hash
+    my $n_subtrees = $recurse eq 'HASH' ? @k : @$tree;       # number of subtrees
     my $next_subpath;                                        # iterator into next subtree
 
     if (!$n_subtrees && $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
@@ -165,7 +251,7 @@ sub each_path (+;$) {
         while (1) {
           if (!$next_subpath) {                              # if there is no current iterator
             if (!$is_consumed && $i < $n_subtrees) {         # if there is a chance to get a new iterator
-              my $subtree   = $reftype eq 'HASH' ? $tree->{$k[$i]} : $tree->[$i];
+              my $subtree   = $recurse eq 'HASH' ? $tree->{$k[$i]} : $tree->[$i];
               $next_subpath = each_path($subtree, $max_depth-1); # build an iterator on next subtree
             }
             else {                                           # end of data
@@ -174,7 +260,7 @@ sub each_path (+;$) {
             }
           }
           if (my ($subpath, $subval) = $next_subpath->()) {  # try to get content from the current iterator
-            my $path_item = $reftype eq 'HASH' ? $k[$i] : $i;
+            my $path_item = $recurse eq 'HASH' ? $k[$i] : $i;
             return ([$path_item, @$subpath], $subval);       # found a path, return it
           }
           else {                                             # mark that the iterator on this subtree ..
