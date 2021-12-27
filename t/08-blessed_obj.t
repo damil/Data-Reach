@@ -5,7 +5,7 @@ use Test::NoWarnings;
 use Data::Reach;
 use Object::MultiType;
 
-plan tests => 15;
+plan tests => 20;
 
 my %expected_plain_paths = (
   'plain,array,0'    => '',
