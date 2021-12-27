@@ -5,19 +5,8 @@ use Carp         qw/carp croak/;
 use Scalar::Util qw/blessed reftype/;
 use overload;
 
-use Try::Tiny;
+our $VERSION    = '2.00';
 
-our $VERSION    = '1.00';
-
-
-=begin TODO
-
-  - each_path() and map_paths() should respect :peek_blessed
-  - rename 'call_method' : should be 'reach_method' .. and need another method 'paths_method'
-
-=end TODO
-
-=cut
 
 #======================================================================
 # reach() and utility functions
@@ -353,8 +342,8 @@ datastructure.
 =item *
 
 the C<each_path> function returns an iterator over the nested datastructure; it can be
-used in the same spirit as an C<each> statement over a simple hash, except that it will
-walk through all paths within the nested datastructure
+used in the same spirit as a regular C<each> statement over a simple hash, except that it will
+walk down multiple levels until finding leaf nodes
 
 =back
 
@@ -461,13 +450,15 @@ The C<$data_tree> argument is usually a reference to a hash or to an array;
 but it can also be supplied directly as a hash or array -- this will be automatically
 converted into a reference.
 
-Unlike the L</reach> method, blessed objects are currently treated like raw datastructures;
-this will be improved in a next release.
+By default, blessed objects are treated just like raw, unblessed
+datastructures; however that behaviour can be changed through
+pragma options, as described below.
+
 
 =head2 each_path
 
-  my $next_path = each_path $data_tree [, $max_depth];
-  while (my ($path, $val) = $next_path->()) {
+  my $next_path_iterator = each_path $data_tree [, $max_depth];
+  while (my ($path, $val) = $next_path_iterator->()) {
     do_something_with($path, $val);
   }
 
@@ -476,18 +467,20 @@ Each call to the iterator will return a pair C<($path, $val)>, where
 C<$path> is an arrayref that contains the sequence of hash keys or
 array indices that were traversed, and C<$val> is the leaf node.
 
-Unlike the L</reach> method, blessed objects are currently treated like raw datastructures;
-this will be improved in a next release.
+By default, blessed objects are treated just like raw, unblessed
+datastructures; however that behaviour can be changed through
+pragma options, as described below.
+
 
 =head1 IMPORT INTERFACE
 
 =head2 Exporting the 'reach', 'map_paths' and 'each_path' functions
 
-The 'reach', 'map_paths' and 'each_path' functions are exported by default 
+The 'reach', 'map_paths' and 'each_path' functions are exported by default
 when C<use>ing this module :
 
   use Data::Reach;
-  use Data::Reach qw/reach/; # equivalent to the line above
+  use Data::Reach qw/reach map_paths each_path/; # equivalent to the line above
 
 However the exported names can be changed through the C<as> option :
 
@@ -498,28 +491,27 @@ However the exported names can be changed through the C<as> option :
 =head2 Pragma options for reaching within objects
 
 Arguments to the import method may also change the algorithm used to
-C<reach> within objects. These options can be turned on or off as
-lexical pragmata; this means that the effect of change of algorithm
-is valid until the end of the current scope (see L<perlfunc/use>,
-L<perlfunc/no> and L<perlpragma>).
+deal with objects met while traversing the datastructure. These
+options can be turned on or off as lexical pragmata; this means that
+the effect of change of algorithm is valid until the end of the
+current scope (see L<perlfunc/use>, L<perlfunc/no> and L<perlpragma>).
 
 =over
 
 =item C<reach_method>
 
-  use Data::Reach reach_method => 'foo';         # just one method
-  use Data::Reach reach_method => [qw/foo bar/]; # an ordered list of methods
+  use Data::Reach reach_method => $method_name;
 
 If the target object possesses a method corresponding to the
-name(s) specified, that method will be called, with a single
+name specified, that method will be called, with a single
 argument corresponding to the current value in path.
 The method is supposed to reach down one step into the
 datastructure and return the next data subtree or leaf.
 
-The presence of one of the required methods is the first
+The presence this method is the first
 choice for reaching within an object. If this cannot be applied,
 either because there was no required method, or because the
-target object has none of them, then the second choice
+target object has no such method, then the second choice
 is to use overloads, as described below.
 
 =item C<use_overloads>
@@ -544,6 +536,17 @@ within the object's hashref). Turn it off if you want objects to
 stay opaque, with public methods as the only way to reach
 internal information.
 
+
+=item C<paths_method>
+
+  use Data::Reach paths_method => $method_name;
+
+If the target object possesses a method corresponding to the
+name specified, that method will be called for for finding the
+list of path items under the current tree (like the list of
+keys for a hash, or the list of indices for an array).
+
+
 =back
 
 Note that several options can be tuned in one single statement :
@@ -553,9 +556,9 @@ Note that several options can be tuned in one single statement :
 
 =head1 SEE ALSO
 
-There are many similar modules on CPAN, each of them having some
-variations in the set of features. Here are a few pointers, and the
-reasons why I didn't use them :
+For reaching data subtrees, there are many similar modules on CPAN,
+each of them having some variations in the set of features. Here are a
+few pointers, and the reasons why I didn't use them :
 
 =over 
 
@@ -602,29 +605,18 @@ instead of an array of values. Does not handle overloads.
 
 Laurent Dami, C<< <dami at cpan.org> >>
 
-=head1 BUGS
-
-Please report any bugs or feature requests to C<bug-data-reach at
-rt.cpan.org>, or through the web interface at
-L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Data-Reach>.  I will
-be notified, and then you'll automatically be notified of progress on
-your bug as I make changes.
-
-
-
-
 =head1 SUPPORT
 
 You can find documentation for this module with the perldoc command.
 
     perldoc Data::Reach
 
-
 You can also look for information at L<https://metacpan.org/pod/Data::Reach>
 
 
-The source code is at
-L<https://github.com/damil/Data-Reach>.
+The source code is at L<https://github.com/damil/Data-Reach>.
+Bug reports or feature requests can be addressed at L<https://github.com/damil/Data-Reach/issues>.
+
 
 
 =head1 LICENSE AND COPYRIGHT
