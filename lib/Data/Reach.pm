@@ -161,7 +161,7 @@ sub each_path (+;$) {
   my $hint_hash = (caller(1))[10];
   my $use_overloads       = $hint_hash->{'Data::Reach/use_overloads'} // 1; # default
   my $peek_blessed        = $hint_hash->{'Data::Reach/peek_blessed'}  // 1; # default
-  my $keep_empty_subtrees = $hint_hash->{'Data::Reach/keep_empty_subtrees'}) {
+  my $keep_empty_subtrees = $hint_hash->{'Data::Reach/keep_empty_subtrees'};
 
   # local boolean variable to avoid returning the same result multiple times
   my $is_consumed = 0;

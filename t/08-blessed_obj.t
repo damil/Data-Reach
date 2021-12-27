@@ -5,7 +5,7 @@ use Test::NoWarnings;
 use Data::Reach;
 use Object::MultiType;
 
-plan tests => 20;
+plan tests => 25;
 
 my %expected_plain_paths = (
   'plain,array,0'    => '',
@@ -43,8 +43,16 @@ my %expected_all_paths = (%expected_plain_paths, %expected_multi_paths);
 
 
 
+my %expected_multi_4 = (
+  'multi,1' => 'one',
+  'multi,2' => 'two',
+  'multi,3' => 'three',
+  'multi,4' => '',
+ );
 
-# exceptions
+
+
+# test exceptions
 sub dies_ok (&$;$) {
   my ($coderef, $regex, $message) = @_;
   eval {$coderef->()};
@@ -70,8 +78,10 @@ my %all_paths  = map_paths {join(",", @_) => $_} $tree;
 is_deeply(\%all_paths, \%expected_all_paths, 'defaults all_paths');
 
 
-
-
+%all_paths = ();
+my $next_path = each_path $tree;
+while (my ($path, $leaf) = $next_path->()) {$all_paths{join ",", @$path} = $leaf}
+is_deeply(\%all_paths, \%expected_all_paths, 'defaults each_path');
 
 
 { no Data::Reach qw/peek_blessed/;
@@ -85,6 +95,11 @@ is_deeply(\%all_paths, \%expected_all_paths, 'defaults all_paths');
 
   %all_paths  = map_paths {join(",", @_) => $_} $tree;
   is_deeply(\%all_paths, \%expected_all_paths, 'no peek_blessed all_paths');
+
+  %all_paths = ();
+  my $next_path = each_path $tree;
+  while (my ($path, $leaf) = $next_path->()) {$all_paths{join ",", @$path} = $leaf}
+  is_deeply(\%all_paths, \%expected_all_paths, 'no peek_blessed each_path');
 }
 
 
@@ -100,7 +115,17 @@ is_deeply(\%all_paths, \%expected_all_paths, 'defaults all_paths');
   my $path_multi = delete $all_paths{multi};
   is_deeply(\%all_paths, \%expected_plain_paths, 'no peek_blessed no use_overloads all_paths');
   isa_ok($path_multi, 'Object::MultiType',       'no peek_blessed no use_overloads opaque object');
+
+
+  %all_paths = ();
+  my $next_path = each_path $tree;
+  while (my ($path, $leaf) = $next_path->()) {$all_paths{join ",", @$path} = $leaf}
+  $path_multi = delete $all_paths{multi};
+  is_deeply(\%all_paths, \%expected_plain_paths, 'no peek_blessed no use_overloads each_path');
+  isa_ok($path_multi, 'Object::MultiType',       'no peek_blessed no use_overloads opaque object');
 }
+
+
 
 
 
@@ -122,10 +147,12 @@ is_deeply(\%all_paths, \%expected_all_paths, 'defaults all_paths');
 
   %all_paths = map_paths {join(",", @_) => $_} $tree;
   delete $all_paths{$_} for grep {/^plain/} keys %all_paths;
-  is_deeply(\%all_paths, {'multi,1' => 'one',
-                          'multi,2' => 'two',
-                          'multi,3' => 'three',
-                          'multi,4' => '',}, 'paths_method multi');
+  is_deeply(\%all_paths, \%expected_multi_4, 'map_paths paths_method multi');
 
+  %all_paths = ();
+  my $next_path = each_path $tree;
+  while (my ($path, $leaf) = $next_path->()) {$all_paths{join ",", @$path} = $leaf}
+  delete $all_paths{$_} for grep {/^plain/} keys %all_paths;
+  is_deeply(\%all_paths,  \%expected_multi_4, 'each_path paths_method multi');
 }
 
